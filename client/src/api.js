@@ -2,13 +2,10 @@ import axios from 'axios';
 
 const BASE = import.meta.env.VITE_API_URL || '';
 
-const api = axios.create({
-  baseURL: BASE,
-  timeout: 10000,
-});
+const api = axios.create({ baseURL: BASE, timeout: 10000 });
 
 export const getStatements = () => api.get('/api/statements');
-export const getMyVotes = () => api.get('/api/my-votes');
+export const getMyVotes    = () => api.get('/api/my-votes');
 
 export const castVote = (statementId, type, turnstileToken) =>
   api.post('/api/vote', { statementId, type, turnstileToken });

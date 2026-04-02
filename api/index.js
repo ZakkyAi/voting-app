@@ -1,7 +1,19 @@
 const express = require('express');
 const cors = require('cors');
-const mongoose = require('mongoose');
+const admin = require('firebase-admin');
 const rateLimit = require('express-rate-limit');
+
+// --- Firebase init (cached for serverless) ---
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    }),
+  });
+}
+const db = admin.firestore();
 
 const app = express();
 
@@ -15,7 +27,7 @@ app.use(express.json());
 
 // --- Rate limiting ---
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
@@ -23,40 +35,10 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// --- MongoDB connection (cached for serverless) ---
-let cachedDb = null;
-async function connectDB() {
-  if (cachedDb) return cachedDb;
-  const conn = await mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 5000,
-  });
-  cachedDb = conn;
-  return cachedDb;
-}
-
-// --- Schemas ---
-const statementSchema = new mongoose.Schema({
-  text: { type: String, required: true, trim: true, maxlength: 500 },
-  votes: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now },
-});
-
-const voteSchema = new mongoose.Schema({
-  statementId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: 'Statement' },
-  identifier: { type: String, required: true }, // IP + UA hash
-  type: { type: String, enum: ['up', 'down'], required: true },
-  createdAt: { type: Date, default: Date.now },
-});
-voteSchema.index({ statementId: 1, identifier: 1 }, { unique: true });
-
-const Statement = mongoose.models.Statement || mongoose.model('Statement', statementSchema);
-const Vote = mongoose.models.Vote || mongoose.model('Vote', voteSchema);
-
 // --- Helpers ---
 function getIdentifier(req) {
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
   const ua = req.headers['user-agent'] || '';
-  // Simple hash for identifier
   let hash = 0;
   const str = ip + ua;
   for (let i = 0; i < str.length; i++) {
@@ -68,7 +50,6 @@ function getIdentifier(req) {
 
 async function verifyTurnstile(token, ip) {
   if (!token) return false;
-  // Allow bypass in test/dev mode with dummy sitekey
   if (process.env.TURNSTILE_SECRET_KEY === '1x0000000000000000000000000000000AA') return true;
   try {
     const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
@@ -98,13 +79,14 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-// GET /api/statements — list all sorted by votes desc
+// GET /api/statements
 app.get('/api/statements', async (req, res) => {
   try {
-    await connectDB();
-    const statements = await Statement.find({}).sort({ votes: -1, createdAt: -1 }).lean();
+    const snap = await db.collection('statements').orderBy('votes', 'desc').orderBy('createdAt', 'desc').get();
+    const statements = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.json(statements);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Database error' });
   }
 });
@@ -115,10 +97,15 @@ app.post('/api/statements', async (req, res) => {
   const { text } = req.body;
   if (!text || text.trim().length < 3) return res.status(400).json({ error: 'Text too short' });
   try {
-    await connectDB();
-    const statement = await Statement.create({ text: text.trim() });
-    res.status(201).json(statement);
+    const ref = await db.collection('statements').add({
+      text: text.trim(),
+      votes: 0,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const doc = await ref.get();
+    res.status(201).json({ id: doc.id, ...doc.data() });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Database error' });
   }
 });
@@ -127,16 +114,20 @@ app.post('/api/statements', async (req, res) => {
 app.delete('/api/statements/:id', async (req, res) => {
   if (!isAdmin(req)) return res.status(403).json({ error: 'Forbidden' });
   try {
-    await connectDB();
-    await Statement.findByIdAndDelete(req.params.id);
-    await Vote.deleteMany({ statementId: req.params.id });
+    await db.collection('statements').doc(req.params.id).delete();
+    // Delete associated votes
+    const votesSnap = await db.collection('votes').where('statementId', '==', req.params.id).get();
+    const batch = db.batch();
+    votesSnap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
     res.json({ ok: true });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Database error' });
   }
 });
 
-// POST /api/vote — cast or change a vote
+// POST /api/vote
 app.post('/api/vote', async (req, res) => {
   const { statementId, type, turnstileToken } = req.body;
   if (!statementId || !['up', 'down'].includes(type)) {
@@ -145,60 +136,66 @@ app.post('/api/vote', async (req, res) => {
 
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
 
-  // Verify Turnstile
   const valid = await verifyTurnstile(turnstileToken, ip);
-  if (!valid) return res.status(403).json({ error: 'Turnstile verification failed. Please complete the challenge.' });
+  if (!valid) return res.status(403).json({ error: 'Turnstile verification failed.' });
 
   const identifier = getIdentifier(req);
 
   try {
-    await connectDB();
+    const statRef = db.collection('statements').doc(statementId);
+    const voteId = `${statementId}_${identifier}`;
+    const voteRef = db.collection('votes').doc(voteId);
 
-    const statement = await Statement.findById(statementId);
-    if (!statement) return res.status(404).json({ error: 'Statement not found' });
+    const [statDoc, voteDoc] = await Promise.all([statRef.get(), voteRef.get()]);
 
-    const existing = await Vote.findOne({ statementId, identifier });
+    if (!statDoc.exists) return res.status(404).json({ error: 'Statement not found' });
 
-    if (existing) {
-      if (existing.type === type) {
-        // Same vote → retract it
-        await Vote.deleteOne({ _id: existing._id });
+    const currentVotes = statDoc.data().votes || 0;
+
+    if (voteDoc.exists) {
+      const existingType = voteDoc.data().type;
+      if (existingType === type) {
+        // Retract
         const delta = type === 'up' ? -1 : 1;
-        statement.votes += delta;
-        await statement.save();
-        return res.json({ statement, action: 'retracted', userVote: null });
+        await Promise.all([
+          voteRef.delete(),
+          statRef.update({ votes: admin.firestore.FieldValue.increment(delta) }),
+        ]);
+        const updated = await statRef.get();
+        return res.json({ statement: { id: updated.id, ...updated.data() }, action: 'retracted', userVote: null });
       } else {
-        // Different vote → switch it
+        // Switch
         const delta = type === 'up' ? 2 : -2;
-        existing.type = type;
-        await existing.save();
-        statement.votes += delta;
-        await statement.save();
-        return res.json({ statement, action: 'changed', userVote: type });
+        await Promise.all([
+          voteRef.update({ type }),
+          statRef.update({ votes: admin.firestore.FieldValue.increment(delta) }),
+        ]);
+        const updated = await statRef.get();
+        return res.json({ statement: { id: updated.id, ...updated.data() }, action: 'changed', userVote: type });
       }
     }
 
     // New vote
-    await Vote.create({ statementId, identifier, type });
-    statement.votes += type === 'up' ? 1 : -1;
-    await statement.save();
-    return res.json({ statement, action: 'added', userVote: type });
+    await Promise.all([
+      voteRef.set({ statementId, identifier, type, createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+      statRef.update({ votes: admin.firestore.FieldValue.increment(type === 'up' ? 1 : -1) }),
+    ]);
+    const updated = await statRef.get();
+    return res.json({ statement: { id: updated.id, ...updated.data() }, action: 'added', userVote: type });
+
   } catch (err) {
-    if (err.code === 11000) {
-      return res.status(429).json({ error: 'Duplicate vote detected' });
-    }
+    console.error(err);
     res.status(500).json({ error: 'Database error' });
   }
 });
 
-// GET /api/my-votes — return which statements the user voted on (by identifier)
+// GET /api/my-votes
 app.get('/api/my-votes', async (req, res) => {
   const identifier = getIdentifier(req);
   try {
-    await connectDB();
-    const votes = await Vote.find({ identifier }).lean();
+    const snap = await db.collection('votes').where('identifier', '==', identifier).get();
     const result = {};
-    votes.forEach(v => { result[v.statementId.toString()] = v.type; });
+    snap.docs.forEach(d => { result[d.data().statementId] = d.data().type; });
     res.json(result);
   } catch {
     res.json({});
