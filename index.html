@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Anonymous community voting. No account needed." />
+  <title>Community Votes</title>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #fff;
+      color: #111;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .wrap {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 40px 16px 80px;
+    }
+
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 4px; }
+    .sub { color: #888; font-size: 14px; margin-bottom: 28px; }
+
+    /* Toast */
+    #toast {
+      display: none;
+      background: #111;
+      color: #fff;
+      font-size: 13px;
+      padding: 8px 14px;
+      margin-bottom: 16px;
+    }
+
+    /* List */
+    #list { border: 1px solid #ddd; }
+
+    .card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid #ddd;
+    }
+    .card:last-child { border-bottom: none; }
+
+    .rank { font-size: 12px; color: #888; min-width: 24px; flex-shrink: 0; }
+
+    .body { flex: 1; min-width: 0; }
+    .text { font-size: 14px; word-break: break-word; }
+    .time { font-size: 11px; color: #888; }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .vbtn {
+      background: none;
+      border: 1px solid #ddd;
+      cursor: pointer;
+      font-size: 11px;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #888;
+    }
+    .vbtn:hover { border-color: #111; color: #111; }
+    .vbtn.active-up { background: #111; color: #fff; border-color: #111; }
+    .vbtn.active-down { background: #888; color: #fff; border-color: #888; }
+    .vbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .score { font-size: 12px; font-weight: 700; min-width: 28px; text-align: center; }
+    .score.pos { color: #111; }
+    .score.neg { color: #888; }
+
+    .del { background: none; border: none; cursor: pointer; color: #bbb; font-size: 11px; padding: 2px 4px; }
+    .del:hover { color: #111; }
+
+    /* States */
+    #state { color: #888; font-size: 14px; padding: 40px 0; }
+
+    /* Overlay */
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .overlay.open { display: flex; }
+
+    .modal {
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 24px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .modal-wide { max-width: 480px; }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .modal-title { font-weight: 700; font-size: 15px; }
+    .modal-sub { font-size: 13px; color: #888; margin-bottom: 16px; }
+
+    .xbtn { background: none; border: none; cursor: pointer; color: #888; font-size: 16px; }
+    .xbtn:hover { color: #111; }
+
+    .ts-wrap { display: flex; justify-content: center; margin-bottom: 16px; }
+    .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Form */
+    .form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+    input[type=password], textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+    }
+    input[type=password]:focus, textarea:focus { border-color: #111; }
+    textarea { resize: vertical; min-height: 80px; }
+
+    .btn {
+      background: #111;
+      color: #fff;
+      border: 1px solid #111;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.8; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-ghost {
+      background: none;
+      color: #888;
+      border: 1px solid #ddd;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .btn-ghost:hover { border-color: #111; color: #111; }
+
+    /* Admin list */
+    #admin-list { border: 1px solid #ddd; max-height: 280px; overflow-y: auto; }
+    .a-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #ddd;
+      font-size: 13px;
+      color: #888;
+    }
+    .a-item:last-child { border-bottom: none; }
+    .a-item span { flex: 1; }
+
+    .err { font-size: 13px; color: #c00; }
+
+    /* FAB */
+    #fab {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      background: #111;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    #fab:hover { opacity: 0.8; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Community Votes</h1>
+  <p class="sub">Vote anonymously. No account needed.</p>
+
+  <div id="toast"></div>
+  <div id="state">Loading…</div>
+  <div id="list" style="display:none"></div>
+</div>
+
+<button id="fab" onclick="openAdmin()" aria-label="Admin">⚙</button>
+
+<!-- Turnstile Modal -->
+<div class="overlay" id="ts-overlay">
+  <div class="modal">
+    <p class="modal-title" style="margin-bottom:8px">Verify you're human</p>
+    <p class="modal-sub">Complete the check to cast your vote.</p>
+    <div class="ts-wrap">
+      <div class="cf-turnstile" id="ts-widget" data-sitekey="__SITE_KEY__" data-callback="onTsSuccess" data-theme="light"></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-ghost" onclick="closeTs()">Cancel</button>
+      <button class="btn" id="ts-submit" disabled onclick="submitVote()">Submit Vote</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Modal -->
+<div class="overlay" id="admin-overlay">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <span class="modal-title">Admin Panel</span>
+      <button class="xbtn" onclick="closeAdmin()">✕</button>
+    </div>
+
+    <div id="admin-auth">
+      <div class="form">
+        <input type="password" id="admin-key-input" placeholder="Admin key" />
+        <p class="err" id="auth-err" style="display:none">Wrong key</p>
+        <button class="btn" onclick="adminLogin()">Unlock</button>
+      </div>
+    </div>
+
+    <div id="admin-panel" style="display:none">
+      <div class="form">
+        <textarea id="new-stmt" placeholder="New statement…" maxlength="500"></textarea>
+        <p class="err" id="create-err" style="display:none"></p>
+        <button class="btn" id="add-btn" onclick="addStatement()">+ Add Statement</button>
+      </div>
+      <div id="admin-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Config ──────────────────────────────────────────────────────────────
+  const SITE_KEY = document.querySelector('.cf-turnstile')?.dataset.sitekey || '1x00000000000000000000AA';
+
+  // ── State ───────────────────────────────────────────────────────────────
+  let statements = [];
+  let myVotes = {};
+  let adminKey = '';
+  let pendingVote = null; // { id, type }
+  let tsToken = null;
+  let adminAuthed = false;
+
+  // ── Toast ────────────────────────────────────────────────────────────────
+  let toastTimer;
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.style.display = 'none'; }, 2500);
+  }
+
+  // ── Time ─────────────────────────────────────────────────────────────────
+  function timeAgo(ts) {
+    if (!ts) return '';
+    const d = ts._seconds ? ts._seconds * 1000 : ts.seconds ? ts.seconds * 1000 : new Date(ts).getTime();
+    const diff = Date.now() - d;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    return Math.floor(hrs / 24) + 'd ago';
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  function render() {
+    const listEl = document.getElementById('list');
+    const stateEl = document.getElementById('state');
+
+    if (statements.length === 0) {
+      listEl.style.display = 'none';
+      stateEl.style.display = 'block';
+      stateEl.textContent = 'No statements yet.';
+      return;
+    }
+
+    stateEl.style.display = 'none';
+    listEl.style.display = 'block';
+    listEl.innerHTML = '';
+
+    statements.forEach((s, i) => {
+      const uv = myVotes[s.id];
+      const score = s.votes || 0;
+      const scoreClass = score > 0 ? 'pos' : score < 0 ? 'neg' : '';
+      const scoreText = (score > 0 ? '+' : '') + score;
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <span class="rank">#${i + 1}</span>
+        <div class="body">
+          <div class="text">${escHtml(s.text)}</div>
+          <div class="time">${timeAgo(s.createdAt)}</div>
+        </div>
+        <div class="actions">
+          <button class="vbtn ${uv === 'up' ? 'active-up' : ''}" onclick="voteClick('${s.id}','up')" aria-label="Upvote">▲</button>
+          <span class="score ${scoreClass}">${scoreText}</span>
+          <button class="vbtn ${uv === 'down' ? 'active-down' : ''}" onclick="voteClick('${s.id}','down')" aria-label="Downvote">▼</button>
+          ${adminAuthed ? `<button class="del" onclick="deleteStmt('${s.id}')">✕</button>` : ''}
+        </div>
+      `;
+      listEl.appendChild(card);
+    });
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Load ─────────────────────────────────────────────────────────────────
+  async function load() {
+    try {
+      const [s, v] = await Promise.all([
+        fetch('/api/statements').then(r => r.json()),
+        fetch('/api/my-votes').then(r => r.json()),
+      ]);
+      statements = s;
+      myVotes = v;
+      render();
+    } catch {
+      document.getElementById('state').textContent = 'Failed to load.';
+    }
+  }
+
+  // ── Voting ────────────────────────────────────────────────────────────────
+  function voteClick(id, type) {
+    pendingVote = { id, type };
+    tsToken = null;
+    document.getElementById('ts-submit').disabled = true;
+    // Reset widget
+    if (window.turnstile) window.turnstile.reset('#ts-widget');
+    document.getElementById('ts-overlay').classList.add('open');
+  }
+
+  function onTsSuccess(token) {
+    tsToken = token;
+    document.getElementById('ts-submit').disabled = false;
+  }
+
+  function closeTs() {
+    document.getElementById('ts-overlay').classList.remove('open');
+    pendingVote = null;
+    tsToken = null;
+  }
+
+  async function submitVote() {
+    if (!pendingVote || !tsToken) return;
+    const { id, type } = pendingVote;
+    closeTs();
+
+    try {
+      const res = await fetch('/api/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ statementId: id, type, turnstileToken: tsToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast(data.error || 'Vote failed'); return; }
+
+      const updated = data.statement;
+      statements = statements.map(s => s.id === updated.id ? updated : s)
+        .sort((a, b) => (b.votes || 0) - (a.votes || 0));
+      myVotes[id] = data.userVote;
+
+      if (data.action === 'retracted') toast('Vote removed');
+      else if (data.action === 'changed') toast(type === 'up' ? 'Changed to upvote' : 'Changed to downvote');
+      else toast(type === 'up' ? 'Upvoted!' : 'Downvoted!');
+
+      render();
+    } catch {
+      toast('Vote failed');
+    }
+  }
+
+  // ── Admin ─────────────────────────────────────────────────────────────────
+  function openAdmin() {
+    document.getElementById('admin-overlay').classList.add('open');
+  }
+
+  function closeAdmin() {
+    document.getElementById('admin-overlay').classList.remove('open');
+  }
+
+  function adminLogin() {
+    const key = document.getElementById('admin-key-input').value.trim();
+    if (!key) return;
+    adminKey = key;
+    adminAuthed = true;
+    document.getElementById('admin-auth').style.display = 'none';
+    document.getElementById('admin-panel').style.display = 'block';
+    renderAdminList();
+    render();
+  }
+
+  function renderAdminList() {
+    const el = document.getElementById('admin-list');
+    el.innerHTML = '';
+    statements.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'a-item';
+      item.innerHTML = `<span>${escHtml(s.text)}</span><button class="del" onclick="deleteStmt('${s.id}')">✕</button>`;
+      el.appendChild(item);
+    });
+  }
+
+  async function addStatement() {
+    const text = document.getElementById('new-stmt').value.trim();
+    const errEl = document.getElementById('create-err');
+    const btn = document.getElementById('add-btn');
+    if (!text) return;
+    btn.disabled = true;
+    errEl.style.display = 'none';
+    try {
+      const res = await fetch('/api/statements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 403) { adminKey = ''; adminAuthed = false; document.getElementById('admin-auth').style.display = 'block'; document.getElementById('admin-panel').style.display = 'none'; }
+        errEl.textContent = data.error || 'Failed';
+        errEl.style.display = 'block';
+        return;
+      }
+      statements.unshift(data);
+      document.getElementById('new-stmt').value = '';
+      renderAdminList();
+      render();
+    } catch {
+      errEl.textContent = 'Network error';
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function deleteStmt(id) {
+    if (!window.confirm('Delete this statement?')) return;
+    try {
+      const res = await fetch(`/api/statements/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-key': adminKey },
+      });
+      if (res.status === 403) { adminKey = ''; adminAuthed = false; return; }
+      statements = statements.filter(s => s.id !== id);
+      renderAdminList();
+      render();
+      toast('Deleted');
+    } catch {
+      toast('Delete failed');
+    }
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  load();
+</script>
+</body>
+</html>
