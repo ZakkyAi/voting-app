@@ -5,7 +5,7 @@
   "main": "api/index.js",
   "scripts": {
     "dev": "node api/server.js",
-    "build": "cd client && npx vite build",
+    "build": "cd client && npm install && npm run build",
     "install-all": "npm install && cd client && npm install"
   },
   "dependencies": {
