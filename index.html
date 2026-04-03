@@ -247,7 +247,6 @@
         <p class="err" id="create-err" style="display:none"></p>
         <button class="btn" id="add-btn" onclick="addStatement()">+ Add Statement</button>
       </div>
-      <div id="admin-list"></div>
     </div>
   </div>
 </div>
@@ -413,20 +412,10 @@
     adminAuthed = true;
     document.getElementById('admin-auth').style.display = 'none';
     document.getElementById('admin-panel').style.display = 'block';
-    renderAdminList();
     render();
   }
 
-  function renderAdminList() {
-    const el = document.getElementById('admin-list');
-    el.innerHTML = '';
-    statements.forEach(s => {
-      const item = document.createElement('div');
-      item.className = 'a-item';
-      item.innerHTML = `<span>${escHtml(s.text)}</span><button class="del" onclick="deleteStmt('${s.id}')">✕</button>`;
-      el.appendChild(item);
-    });
-  }
+
 
   async function addStatement() {
     const text = document.getElementById('new-stmt').value.trim();
@@ -450,7 +439,6 @@
       }
       statements.unshift(data);
       document.getElementById('new-stmt').value = '';
-      renderAdminList();
       render();
     } catch {
       errEl.textContent = 'Network error';
@@ -469,7 +457,6 @@
       });
       if (res.status === 403) { adminKey = ''; adminAuthed = false; return; }
       statements = statements.filter(s => s.id !== id);
-      renderAdminList();
       render();
       toast('Deleted');
     } catch {

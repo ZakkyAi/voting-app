@@ -74,10 +74,6 @@ function isAdmin(req) {
 
 // ===== ROUTES =====
 
-// GET /api/health
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
-});
 
 // GET /api/statements
 app.get('/api/statements', async (req, res) => {
