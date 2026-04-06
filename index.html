@@ -393,7 +393,7 @@
     <p class="modal-title" style="margin-bottom:8px">Verify you're human</p>
     <p class="modal-sub">Complete the check to cast your vote.</p>
     <div class="ts-wrap">
-      <div class="cf-turnstile" id="ts-widget" data-sitekey="__SITE_KEY__" data-callback="onTsSuccess" data-theme="light"></div>
+      <div class="cf-turnstile" id="ts-widget" data-sitekey="0x4AAAAAAC1bNFLF0TwkZk9k" data-callback="onTsSuccess" data-theme="light"></div>
     </div>
     <div class="modal-btns">
       <button class="btn-ghost" onclick="closeTs()">Cancel</button>
@@ -517,15 +517,23 @@
   // ── Load ─────────────────────────────────────────────────────────────────
   async function load() {
     try {
-      const [s, v] = await Promise.all([
-        fetch('/api/statements').then(r => r.json()),
-        fetch('/api/my-votes').then(r => r.json()),
-      ]);
+      const res1 = await fetch('/api/statements');
+      const res2 = await fetch('/api/my-votes');
+      
+      const s = await res1.json();
+      const v = await res2.json();
+
+      if (s.error) {
+        document.getElementById('state').innerHTML = `<p class="err" style="display:inline-block">${s.error}</p><br><br>Check your Firebase project status.`;
+        return;
+      }
+
       statements = s;
       myVotes = v;
       render();
-    } catch {
-      document.getElementById('state').textContent = 'Failed to load.';
+    } catch (err) {
+      console.error(err);
+      document.getElementById('state').textContent = 'Failed to connect to server.';
     }
   }
 

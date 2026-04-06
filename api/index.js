@@ -1,4 +1,6 @@
+require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const rateLimit = require('express-rate-limit');
@@ -7,9 +9,9 @@ const rateLimit = require('express-rate-limit');
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      project_id: process.env.FIREBASE_PROJECT_ID,
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
     }),
   });
 }
@@ -196,6 +198,15 @@ app.get('/api/my-votes', async (req, res) => {
   } catch {
     res.json({});
   }
+});
+
+// Serve static files from the root
+app.use(express.static(path.join(__dirname, '..')));
+
+// Fallback to index.html for frontend
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Endpoint not found' });
+  res.sendFile(path.join(__dirname, '..', 'index.html'));
 });
 
 module.exports = app;
