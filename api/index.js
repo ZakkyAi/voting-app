@@ -80,7 +80,7 @@ function isAdmin(req) {
 // GET /api/statements
 app.get('/api/statements', async (req, res) => {
   try {
-    const snap = await db.collection('statements').orderBy('votes', 'desc').orderBy('createdAt', 'desc').get();
+    const snap = await db.collection('statements').orderBy('votes', 'desc').get();
     const statements = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.json(statements);
   } catch (err) {
