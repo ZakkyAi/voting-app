@@ -5,7 +5,8 @@
   "main": "api/index.js",
   "scripts": {
     "dev": "node api/server.js",
-    "start": "node api/index.js"
+    "start": "node api/index.js",
+    "test:features": "node scripts/test-all.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
