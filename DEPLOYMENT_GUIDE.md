@@ -12,7 +12,7 @@ graph LR
 
 ## 1. Local Development
 1. **Environment**: Copy `.env.example` to `.env`.
-   - Ensure `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` are set.
+   - Ensure `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` are set.sasad
    - Use the testing keys for Turnstile (already in `.env`).
 2. **Install**: Run `npm install`.
 3. **Run**: Run `npm run dev`.
