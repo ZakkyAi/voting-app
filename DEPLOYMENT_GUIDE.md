@@ -1,7 +1,7 @@
 # 🗳 Voices Voting App — Deployment Guide
 sdsdassas
 ## Architecture Overview
-asdasda
+asdasdasss
 ```mermaid
 graph LR
     User[Browser Vanilla JS] --> API[Express /api/*]
